@@ -1,0 +1,1 @@
+{"Spatial_Accuracy": {"DSC": 0.1854, "HD95": 28.02}, "Dosimetric_Superiority": {"Standard_Healthy_Surv": 1369109.31, "Personalized_Healthy_Surv": 1317373.77, "Healthy_Surv_Increase_Pct": -3.78}}
