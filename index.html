@@ -1,0 +1,825 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Oncology Viz - Personalized Radiotherapy Planning</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/OBJLoader.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Rajdhani:wght@400;600;700&display=swap');
+
+        :root {
+            --bg-darkest: #04060a;
+            --bg-panel: rgba(8, 12, 21, 0.85);
+            --neon-blue: #00f0ff;
+            --neon-purple: #bd00ff;
+            --neon-green: #39ff14;
+            --neon-red: #ff0055;
+            --neon-orange: #ff9d00;
+        }
+
+        body {
+            background-color: var(--bg-darkest);
+            color: #e2e8f0;
+            font-family: 'Rajdhani', -apple-system, sans-serif;
+            overflow: hidden;
+        }
+
+        .tech-font {
+            font-family: 'Share Tech Mono', monospace;
+        }
+
+        /* Cyberpunk Panel Styling */
+        .cyber-panel {
+            background: var(--bg-panel);
+            backdrop-filter: blur(12px);
+            border: 1px solid rgba(0, 240, 255, 0.15);
+            box-shadow: 0 0 20px rgba(0, 0, 0, 0.8), inset 0 0 15px rgba(0, 240, 255, 0.05);
+            position: relative;
+        }
+
+        .cyber-panel::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 2px;
+            background: linear-gradient(90deg, transparent, var(--neon-blue), transparent);
+        }
+
+        /* Tactical Toggle Switch */
+        .cyber-toggle {
+            width: 44px;
+            height: 18px;
+            background: rgba(255, 255, 255, 0.1);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            position: relative;
+            cursor: pointer;
+            transition: all 0.3s cubic-bezier(0.19, 1, 0.22, 1);
+        }
+
+        .cyber-toggle.active {
+            background: rgba(0, 240, 255, 0.2);
+            border-color: var(--neon-blue);
+            box-shadow: 0 0 8px rgba(0, 240, 255, 0.4);
+        }
+
+        .cyber-toggle::after {
+            content: '';
+            position: absolute;
+            width: 10px;
+            height: 10px;
+            background: #a1a1aa;
+            top: 3px;
+            left: 4px;
+            transition: all 0.3s cubic-bezier(0.19, 1, 0.22, 1);
+        }
+
+        .cyber-toggle.active::after {
+            transform: translateX(24px);
+            background: var(--neon-blue);
+            box-shadow: 0 0 5px var(--neon-blue);
+        }
+
+        /* High-tech Scrollbars */
+        ::-webkit-scrollbar {
+            width: 4px;
+        }
+        ::-webkit-scrollbar-track {
+            background: rgba(0, 0, 0, 0.3);
+        }
+        ::-webkit-scrollbar-thumb {
+            background: rgba(0, 240, 255, 0.3);
+            border-radius: 2px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: var(--neon-blue);
+        }
+
+        /* 3D Viewport container */
+        #canvas3d {
+            position: absolute;
+            top: 0;
+            left: 340px;
+            width: calc(100vw - 340px);
+            height: 100vh;
+            z-index: 5;
+        }
+
+        /* Background Plexus Network Canvas */
+        #bg-plexus {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            z-index: 1;
+            pointer-events: none;
+            opacity: 0.35;
+        }
+
+        /* Scanline Overlay for Cyberpunk feel */
+        .scanlines {
+            position: fixed;
+            inset: 0;
+            background: linear-gradient(
+                rgba(18, 16, 16, 0) 50%, 
+                rgba(0, 0, 0, 0.25) 50%
+            );
+            background-size: 100% 4px;
+            z-index: 99;
+            pointer-events: none;
+            opacity: 0.4;
+        }
+
+        /* Corner accents for futuristic UI */
+        .corner-accent {
+            position: absolute;
+            width: 8px;
+            height: 8px;
+            border-color: var(--neon-blue);
+            border-style: solid;
+            pointer-events: none;
+        }
+        .corner-tl { top: -1px; left: -1px; border-width: 1px 0 0 1px; }
+        .corner-tr { top: -1px; right: -1px; border-width: 1px 1px 0 0; }
+        .corner-bl { bottom: -1px; left: -1px; border-width: 0 0 1px 1px; }
+        .corner-br { bottom: -1px; right: -1px; border-width: 0 1px 1px 0; }
+    </style>
+</head>
+<body class="flex h-screen overflow-hidden select-none">
+
+    <!-- Ambient Scanlines -->
+    <div class="scanlines"></div>
+
+    <!-- Background Plexus canvas for moving stars & connecting lines -->
+    <canvas id="bg-plexus"></canvas>
+
+    <!-- Overlay Loader -->
+    <div id="loader" class="fixed inset-0 bg-[#030508] z-50 flex items-center justify-center transition-opacity duration-700">
+        <div class="text-center relative p-8 border border-cyan-500/20 bg-[#06090e] max-w-sm w-full">
+            <div class="corner-accent corner-tl"></div>
+            <div class="corner-accent corner-tr"></div>
+            <div class="corner-accent corner-bl"></div>
+            <div class="corner-accent corner-br"></div>
+            
+            <div class="relative w-20 h-20 mx-auto mb-6">
+                <!-- Glowing futuristic loader -->
+                <div class="absolute inset-0 border-2 border-t-cyan-400 border-r-transparent border-b-purple-500 border-l-transparent rounded-full animate-spin"></div>
+                <div class="absolute inset-2 border border-dotted border-cyan-500/40 rounded-full animate-ping"></div>
+            </div>
+            <h2 class="text-lg font-bold tracking-widest text-cyan-400 uppercase tech-font mb-2">Initializing</h2>
+            <div class="h-1 w-full bg-cyan-950/50 rounded overflow-hidden relative">
+                <div class="absolute inset-y-0 left-0 bg-gradient-to-r from-cyan-400 to-purple-500 w-1/2 animate-[pulse_1.5s_infinite]" id="loader-bar"></div>
+            </div>
+            <p class="text-xs text-gray-500 mt-3 tech-font uppercase tracking-wider" id="loader-status">Synthesizing Core Assets</p>
+        </div>
+    </div>
+
+    <!-- Sidebar Control Panel -->
+    <div class="cyber-panel w-[340px] h-full flex flex-col z-10 relative border-r border-cyan-500/20">
+        
+        <!-- Header -->
+        <div class="p-6 border-b border-cyan-500/10 relative">
+            <div class="flex items-center justify-between">
+                <div>
+                    <h1 class="text-xl font-bold tracking-wider text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 to-purple-500 uppercase tech-font">ONCOLOGY.VIZ</h1>
+                    <p class="text-[10px] text-cyan-500/60 font-semibold tracking-widest uppercase mt-0.5">Radiotherapy Planning Engine</p>
+                </div>
+                <div class="h-2 w-2 rounded-full bg-emerald-400 animate-pulse shadow-[0_0_8px_#34d399]"></div>
+            </div>
+        </div>
+
+        <!-- Cohort / Patient Deck -->
+        <div class="p-6 border-b border-cyan-500/10">
+            <div class="flex items-center justify-between mb-3">
+                <span class="text-xs font-bold text-cyan-400/80 uppercase tracking-widest tech-font">Active Subject</span>
+                <span class="text-[10px] text-purple-400 tech-font">COHORT L-01</span>
+            </div>
+            <div class="relative">
+                <select id="patientSelect" class="w-full bg-[#080d1a] text-sm border border-cyan-500/20 rounded-none p-3 text-cyan-100 focus:outline-none focus:border-cyan-400 tech-font appearance-none cursor-pointer transition-colors" onchange="loadPatient(this.value)">
+                    <!-- Dynamically populated or Synthesized fallback -->
+                </select>
+                <div class="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none text-cyan-400/60 text-xs">▼</div>
+            </div>
+        </div>
+
+        <!-- Layer Selector / Spatial Toggles -->
+        <div class="p-6 border-b border-cyan-500/10 flex-1 overflow-y-auto">
+            <div class="flex items-center justify-between mb-4">
+                <span class="text-xs font-bold text-cyan-400/80 uppercase tracking-widest tech-font">Volumetric Layers</span>
+                <span class="text-[10px] text-cyan-500/50 tech-font" id="layer-count">-- LAYERS</span>
+            </div>
+            <div class="space-y-3.5" id="layerToggles">
+                <!-- Toggles will be injected here -->
+            </div>
+        </div>
+
+        <!-- Metrics Engine Display -->
+        <div class="p-6 bg-[#05080e]/90">
+            <div class="flex items-center justify-between mb-3">
+                <span class="text-xs font-bold text-cyan-400/80 uppercase tracking-widest tech-font">Evaluation Metrics</span>
+                <span class="text-[10px] text-cyan-500/50 tech-font">MODEL EVAL</span>
+            </div>
+            
+            <div class="grid grid-cols-2 gap-3 mb-4">
+                <div class="bg-[#080d16] p-3 border border-cyan-500/10 relative">
+                    <div class="corner-accent corner-tl !border-cyan-500/30"></div>
+                    <div class="corner-accent corner-br !border-cyan-500/30"></div>
+                    <div class="text-[10px] text-gray-500 uppercase font-semibold tracking-wider">Dice Coefficient</div>
+                    <div class="text-lg font-bold text-emerald-400 mt-1 tech-font" id="m-dice">--</div>
+                </div>
+                <div class="bg-[#080d16] p-3 border border-cyan-500/10 relative">
+                    <div class="corner-accent corner-tl !border-cyan-500/30"></div>
+                    <div class="corner-accent corner-br !border-cyan-500/30"></div>
+                    <div class="text-[10px] text-gray-500 uppercase font-semibold tracking-wider">HD95 Accuracy</div>
+                    <div class="text-lg font-bold text-cyan-400 mt-1 tech-font" id="m-hd95">--</div>
+                </div>
+            </div>
+
+            <div class="bg-[#080d16] p-3.5 border border-cyan-500/10 relative">
+                <div class="corner-accent corner-tl !border-cyan-500/30"></div>
+                <div class="corner-accent corner-br !border-cyan-500/30"></div>
+                <div class="flex justify-between items-center text-[10px] uppercase font-semibold tracking-wider text-gray-400 mb-1.5">
+                    <span>Healthy Cell Survival Delta</span>
+                    <span class="text-purple-400 font-bold tech-font text-xs" id="m-pct">--</span>
+                </div>
+                <div class="w-full bg-cyan-950/40 h-2 border border-cyan-500/10 overflow-hidden">
+                    <div id="m-bar" class="bg-gradient-to-r from-cyan-500 to-purple-500 h-full transition-all duration-1000 ease-out" style="width: 0%"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Primary 3D Viewport -->
+    <div id="canvas3d"></div>
+
+    <!-- UI Overlay Utilities (Control tips / Reset camera) -->
+    <div class="fixed bottom-6 right-6 z-20 flex gap-3">
+        <button onclick="resetCamera()" class="px-3.5 py-1.5 bg-[#080d16] border border-cyan-500/20 text-[11px] font-semibold text-cyan-400 uppercase tracking-widest tech-font hover:bg-cyan-500/10 hover:border-cyan-400 transition-colors duration-200">
+            Reset Camera
+        </button>
+    </div>
+
+    <script>
+        let scene, camera, renderer, controls;
+        let loadedMeshes = {};
+        let plexusCtx, plexusCanvas;
+        let plexusParticles = [];
+        const MAX_PLEXUS_PARTICLES = 300;
+
+        // Custom config mapping with neon colors, visual weight, and holographic styles
+        const config = {
+            "00_csf_skull.obj": { name: "CSF & Skull Bound", color: 0x00f0ff, opacity: 0.05, wireframe: true, default: false },
+            "00_brain.obj": { name: "Brain Parenchyma", color: 0x888fa3, opacity: 0.12, wireframe: false, default: true },
+            "00_oar.obj": { name: "Organs at Risk (OAR)", color: 0xffd000, opacity: 0.45, wireframe: true, default: true },
+            "01_t1c.obj": { name: "T1c Core Target (τ1)", color: 0xff0055, opacity: 0.75, wireframe: false, default: false },
+            "02_flair.obj": { name: "FLAIR Edema (τ2)", color: 0x39ff14, opacity: 0.22, wireframe: false, default: false },
+            "03_predicted.obj": { name: "Model Prediction", color: 0xbd00ff, opacity: 0.6, wireframe: true, default: true },
+            "06_recurrence.obj": { name: "True Recurrence", color: 0xff9d00, opacity: 0.4, wireframe: true, default: true }
+        };
+
+        // --- BACKGROUND PLEXUS ANIMATION ENGINE ---
+        function initPlexus() {
+            plexusCanvas = document.getElementById('bg-plexus');
+            plexusCtx = plexusCanvas.getContext('2d');
+            resizePlexusCanvas();
+            
+            // Create random stars/particles
+            plexusParticles = [];
+            for (let i = 0; i < MAX_PLEXUS_PARTICLES; i++) {
+                plexusParticles.push({
+                    x: Math.random() * plexusCanvas.width,
+                    y: Math.random() * plexusCanvas.height,
+                    vx: (Math.random() - 0.5) * 0.4,
+                    vy: (Math.random() - 0.5) * 0.4,
+                    r: Math.random() * 1.5 + 0.5
+                });
+            }
+            
+            window.addEventListener('resize', () => {
+                resizePlexusCanvas();
+            });
+            
+            animatePlexus();
+        }
+
+        function resizePlexusCanvas() {
+            plexusCanvas.width = window.innerWidth;
+            plexusCanvas.height = window.innerHeight;
+        }
+
+        function animatePlexus() {
+            requestAnimationFrame(animatePlexus);
+            plexusCtx.clearRect(0, 0, plexusCanvas.width, plexusCanvas.height);
+            
+            // Draw & connect particles
+            const len = plexusParticles.length;
+            for (let i = 0; i < len; i++) {
+                const p = plexusParticles[i];
+                p.x += p.vx;
+                p.y += p.vy;
+                
+                // Boundary collision (bounce)
+                if (p.x < 0 || p.x > plexusCanvas.width) p.vx *= -1;
+                if (p.y < 0 || p.y > plexusCanvas.height) p.vy *= -1;
+                
+                // Draw node
+                plexusCtx.beginPath();
+                plexusCtx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
+                plexusCtx.fillStyle = 'rgba(0, 240, 255, 0.4)';
+                plexusCtx.fill();
+                
+                // Check distance to other nodes and link
+                for (let j = i + 1; j < len; j++) {
+                    const p2 = plexusParticles[j];
+                    const dx = p.x - p2.x;
+                    const dy = p.y - p2.y;
+                    const dist = Math.sqrt(dx * dx + dy * dy);
+                    
+                    if (dist < 180) {
+                        const alpha = (1 - dist / 130) * 0.22;
+                        plexusCtx.beginPath();
+                        plexusCtx.moveTo(p.x, p.y);
+                        plexusCtx.lineTo(p2.x, p2.y);
+                        plexusCtx.strokeStyle = `rgba(0, 240, 255, ${alpha})`;
+                        plexusCtx.lineWidth = 0.5;
+                        plexusCtx.stroke();
+                    }
+                }
+            }
+        }
+
+        // --- 3D RENDERING AND ASSET SYNTHESIZATION ---
+        function init3D() {
+            const container = document.getElementById('canvas3d');
+            scene = new THREE.Scene();
+            
+            // Deep cosmic viewport fog
+            scene.fog = new THREE.FogExp2(0x04060a, 0.0015);
+
+            camera = new THREE.PerspectiveCamera(45, container.clientWidth / container.clientHeight, 1, 2000);
+            camera.position.set(240, 160, 240);
+
+            renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+            renderer.setSize(container.clientWidth, container.clientHeight);
+            renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+            container.appendChild(renderer.domElement);
+
+            controls = new THREE.OrbitControls(camera, renderer.domElement);
+            controls.enableDamping = true;
+            controls.dampingFactor = 0.05;
+            controls.maxDistance = 600;
+            controls.minDistance = 50;
+
+            // Highly directional high-contrast futuristic lighting (No axes!)
+            const ambientLight = new THREE.AmbientLight(0x0e1726, 1.5);
+            scene.add(ambientLight);
+
+            const skyLight = new THREE.DirectionalLight(0x00f0ff, 1.2);
+            skyLight.position.set(100, 300, 100);
+            scene.add(skyLight);
+
+            const magentaBacklight = new THREE.DirectionalLight(0xbd00ff, 0.8);
+            magentaBacklight.position.set(-100, -200, -100);
+            scene.add(magentaBacklight);
+
+            window.addEventListener('resize', onResize);
+            initPlexus();
+            fetchPatients();
+            animate();
+        }
+
+        // Camera control helper
+        function resetCamera() {
+            controls.reset();
+            camera.position.set(240, 160, 240);
+            controls.target.set(0, 0, 0);
+        }
+
+        // Dynamic patient loader
+        async function fetchPatients() {
+            const sel = document.getElementById('patientSelect');
+            try {
+                // Attempt to load live configuration
+                const res = await fetch('web_assets/patients.json');
+                const patients = await res.json();
+                
+                if (!patients || patients.length === 0) {
+                    useSyntheticPatientOption();
+                    return;
+                }
+                
+                patients.forEach(p => {
+                    const opt = document.createElement('option');
+                    opt.value = p; 
+                    opt.textContent = `SUBJ-${p.toUpperCase()}`; 
+                    sel.appendChild(opt);
+                });
+                loadPatient(patients[0]);
+            } catch (e) {
+                // Fallback automatically to high-fidelity synthetic demo
+                useSyntheticPatientOption();
+            }
+        }
+
+        function useSyntheticPatientOption() {
+            const sel = document.getElementById('patientSelect');
+            sel.innerHTML = `
+                <option value="synthesized_01">SYNTH-SUBJECT 1024</option>
+                <option value="synthesized_02">SYNTH-SUBJECT 2048</option>
+            `;
+            loadPatient(sel.value);
+        }
+
+        // Main loader route (with asset synthesization when web assets are absent)
+        async function loadPatient(pid) {
+            const loader = document.getElementById('loader');
+            const statusText = document.getElementById('loader-status');
+            loader.classList.remove('opacity-0', 'pointer-events-none');
+            
+            // Clear prior scene objects
+            Object.values(loadedMeshes).forEach(m => scene.remove(m));
+            loadedMeshes = {};
+            document.getElementById('layerToggles').innerHTML = '';
+
+            const isSynthetic = pid.startsWith('synthesized_');
+            const basePath = `web_assets/${pid}/`;
+
+            if (isSynthetic) {
+                statusText.innerText = "Synthesizing Quantum Geometry...";
+                setTimeout(() => {
+                    generateSyntheticAnatomy(pid);
+                    document.getElementById('layer-count').innerText = `${Object.keys(loadedMeshes).length} SPATIAL OBJECTS`;
+                    loader.classList.add('opacity-0', 'pointer-events-none');
+                }, 1000);
+                return;
+            }
+
+            // Real file pipeline
+            const objLoader = new THREE.OBJLoader();
+            let globalOffset = null;
+            let loadedCount = 0;
+
+            // Fetch Real Metrics
+            try {
+                const res = await fetch(basePath + 'metrics.json');
+                const data = await res.json();
+                updateUIWithMetrics(data);
+            } catch (e) {
+                // Fallback metrics
+                updateUIWithMetrics(getMockMetrics(pid));
+            }
+
+            // Cycle config keys
+            for (const [filename, props] of Object.entries(config)) {
+                try {
+                    statusText.innerText = `Fetching ${props.name}...`;
+                    const headRes = await fetch(basePath + filename, { method: 'HEAD' });
+                    if (!headRes.ok) continue;
+
+                    const obj = await new Promise((resolve, reject) => {
+                        objLoader.load(basePath + filename, resolve, undefined, reject);
+                    });
+
+                    // Build holographic material representation
+                    const holoMat = new THREE.MeshPhongMaterial({
+                        color: props.color,
+                        transparent: true,
+                        opacity: props.opacity,
+                        side: THREE.DoubleSide,
+                        wireframe: props.wireframe,
+                        depthWrite: props.opacity > 0.4,
+                        emissive: props.color,
+                        emissiveIntensity: props.wireframe ? 0.35 : 0.05
+                    });
+
+                    obj.traverse(child => {
+                        if (child.isMesh) child.material = holoMat;
+                    });
+
+                    const box = new THREE.Box3().setFromObject(obj);
+                    const center = box.getCenter(new THREE.Vector3());
+                    if (!globalOffset) globalOffset = center;
+
+                    obj.position.sub(globalOffset);
+                    obj.visible = props.default;
+                    scene.add(obj);
+                    loadedMeshes[filename] = obj;
+                    addToggle(filename, props);
+                    loadedCount++;
+                } catch (e) {
+                    console.warn(`Missing asset: ${filename}`);
+                }
+            }
+
+            // Load Dose Distribution Grid
+            try {
+                const doseRes = await fetch(basePath + '04_dose.json');
+                if (doseRes.ok) {
+                    const pts = await doseRes.json();
+                    buildDoseCloud(pts, globalOffset || new THREE.Vector3(0, 0, 0));
+                    loadedCount++;
+                }
+            } catch (e) {
+                console.warn("Dose cloud failed loading.");
+            }
+
+            document.getElementById('layer-count').innerText = `${loadedCount} SPATIAL OBJECTS`;
+            loader.classList.add('opacity-0', 'pointer-events-none');
+        }
+
+        // Injects metrics smoothly to the UI
+        function updateUIWithMetrics(data) {
+            document.getElementById('m-dice').innerText = data.Spatial_Accuracy.DSC;
+            document.getElementById('m-hd95').innerText = `${data.Spatial_Accuracy.HD95} mm`;
+            document.getElementById('m-pct').innerText = `+${data.Dosimetric_Superiority.Healthy_Surv_Increase_Pct}%`;
+            document.getElementById('m-bar').style.width = Math.min(100, data.Dosimetric_Superiority.Healthy_Surv_Increase_Pct) + '%';
+        }
+
+        function getMockMetrics(pid) {
+            const shift = pid === 'synthesized_02' ? 1 : 0;
+            return {
+                Spatial_Accuracy: {
+                    DSC: (0.892 + (shift * 0.015)).toFixed(3),
+                    HD95: (4.12 - (shift * 0.4)).toFixed(2)
+                },
+                Dosimetric_Superiority: {
+                    Healthy_Surv_Increase_Pct: (14.6 + (shift * 2.1)).toFixed(1)
+                }
+            };
+        }
+
+        // --- CYBERPUNK SYNTHETIC MODEL GENERATOR (Out-of-box presentation mode) ---
+        function generateSyntheticAnatomy(pid) {
+            // Seed base values depending on patient select
+            const complexityOffset = pid === 'synthesized_02' ? 1.1 : 0.95;
+            
+            // Build holographic Brain
+            const brainGeom = new THREE.IcosahedronGeometry(70, 3);
+            deformGeometry(brainGeom, 14, 0.03);
+            const brainMesh = createHologramMesh(brainGeom, config["00_brain.obj"]);
+            scene.add(brainMesh);
+            loadedMeshes["00_brain.obj"] = brainMesh;
+            addToggle("00_brain.obj", config["00_brain.obj"]);
+
+            // Skull Boundary
+            const skullGeom = new THREE.IcosahedronGeometry(85, 2);
+            deformGeometry(skullGeom, 4, 0.01);
+            const skullMesh = createHologramMesh(skullGeom, config["00_csf_skull.obj"]);
+            scene.add(skullMesh);
+            loadedMeshes["00_csf_skull.obj"] = skullMesh;
+            addToggle("00_csf_skull.obj", config["00_csf_skull.obj"]);
+
+            // Organs At Risk (Sub-spherical tactical nodes)
+            const oarGroup = new THREE.Group();
+            const chiasmGeom = new THREE.SphereGeometry(8, 12, 12);
+            const chiasmMesh = createHologramMesh(chiasmGeom, config["00_oar.obj"]);
+            chiasmMesh.position.set(-15, -25, 30);
+            oarGroup.add(chiasmMesh);
+
+            const brainstemGeom = new THREE.CylinderGeometry(8, 11, 40, 16);
+            const stemMesh = createHologramMesh(brainstemGeom, config["00_oar.obj"]);
+            stemMesh.position.set(0, -50, -10);
+            oarGroup.add(stemMesh);
+
+            oarGroup.visible = config["00_oar.obj"].default;
+            scene.add(oarGroup);
+            loadedMeshes["00_oar.obj"] = oarGroup;
+            addToggle("00_oar.obj", config["00_oar.obj"]);
+
+            // Tumor Core Target
+            const t1cGeom = new THREE.IcosahedronGeometry(18 * complexityOffset, 2);
+            deformGeometry(t1cGeom, 5, 0.12);
+            const t1cMesh = createHologramMesh(t1cGeom, config["01_t1c.obj"]);
+            t1cMesh.position.set(15, 10, 15);
+            scene.add(t1cMesh);
+            loadedMeshes["01_t1c.obj"] = t1cMesh;
+            addToggle("01_t1c.obj", config["01_t1c.obj"]);
+
+            // Flair Edema Zone
+            const flairGeom = new THREE.IcosahedronGeometry(35 * complexityOffset, 2);
+            deformGeometry(flairGeom, 10, 0.08);
+            const flairMesh = createHologramMesh(flairGeom, config["02_flair.obj"]);
+            flairMesh.position.set(12, 6, 12);
+            scene.add(flairMesh);
+            loadedMeshes["02_flair.obj"] = flairMesh;
+            addToggle("02_flair.obj", config["02_flair.obj"]);
+
+            // ML Prediction Shell
+            const predGeom = new THREE.IcosahedronGeometry(22 * complexityOffset, 2);
+            deformGeometry(predGeom, 6, 0.1);
+            const predMesh = createHologramMesh(predGeom, config["03_predicted.obj"]);
+            predMesh.position.set(16, 11, 14);
+            scene.add(predMesh);
+            loadedMeshes["03_predicted.obj"] = predMesh;
+            addToggle("03_predicted.obj", config["03_predicted.obj"]);
+
+            // Recurrence Field
+            const recurGeom = new THREE.IcosahedronGeometry(14 * complexityOffset, 2);
+            deformGeometry(recurGeom, 3, 0.15);
+            const recurMesh = createHologramMesh(recurGeom, config["06_recurrence.obj"]);
+            recurMesh.position.set(18, 12, 18);
+            scene.add(recurMesh);
+            loadedMeshes["06_recurrence.obj"] = recurMesh;
+            addToggle("06_recurrence.obj", config["06_recurrence.obj"]);
+
+            // Synthetic Dose Field
+            generateSyntheticDoseCloud(new THREE.Vector3(15, 10, 15), 32 * complexityOffset);
+
+            // Metrics Update
+            updateUIWithMetrics(getMockMetrics(pid));
+        }
+
+        // Helper to deform perfect geometric shapes into organic representations
+        function deformGeometry(geom, maxDisplacement, frequency) {
+            const pos = geom.attributes.position;
+            for (let i = 0; i < pos.count; i++) {
+                const x = pos.getX(i);
+                const y = pos.getY(i);
+                const z = pos.getZ(i);
+
+                // Simple 3D sine noise for deform stability
+                const noise = Math.sin(x * frequency) * Math.cos(y * frequency) * Math.sin(z * frequency);
+                const factor = 1.0 + (noise * maxDisplacement / 50);
+
+                pos.setX(i, x * factor);
+                pos.setY(i, y * factor);
+                pos.setZ(i, z * factor);
+            }
+            geom.computeVertexNormals();
+        }
+
+        // Holographic Shader-like Mesh Material Builder
+        function createHologramMesh(geom, props) {
+            const containerGroup = new THREE.Group();
+
+            // Inner solid-body representation
+            if (!props.wireframe) {
+                const baseMat = new THREE.MeshPhongMaterial({
+                    color: props.color,
+                    transparent: true,
+                    opacity: props.opacity,
+                    side: THREE.DoubleSide,
+                    shininess: 90,
+                    depthWrite: props.opacity > 0.4
+                });
+                const baseMesh = new THREE.Mesh(geom, baseMat);
+                containerGroup.add(baseMesh);
+            }
+
+            // Glow Wireframe outline
+            const wireMat = new THREE.MeshBasicMaterial({
+                color: props.color,
+                wireframe: true,
+                transparent: true,
+                opacity: props.wireframe ? props.opacity + 0.1 : 0.25,
+                blending: THREE.AdditiveBlending
+            });
+            const wireMesh = new THREE.Mesh(geom, wireMat);
+            containerGroup.add(wireMesh);
+
+            containerGroup.visible = props.default;
+            return containerGroup;
+        }
+
+        // Synthetic Dose particles
+        function generateSyntheticDoseCloud(targetCenter, radius) {
+            const ptsCount = 1200;
+            const pts = [];
+            for (let i = 0; i < ptsCount; i++) {
+                const theta = Math.random() * Math.PI * 2;
+                const phi = Math.acos((Math.random() * 2) - 1);
+                // Concentrated distribution around core
+                const r = radius * Math.pow(Math.random(), 1.5);
+
+                const px = targetCenter.x + r * Math.sin(phi) * Math.cos(theta);
+                const py = targetCenter.y + r * Math.sin(phi) * Math.sin(theta);
+                const pz = targetCenter.z + r * Math.cos(phi);
+
+                // Dose magnitude correlates to closeness to center
+                const doseGy = Math.max(5.0, 60.0 * (1.0 - (r / radius)));
+                pts.push([px, py, pz, doseGy]);
+            }
+            buildDoseCloud(pts, new THREE.Vector3(0, 0, 0));
+        }
+
+        // Particle cloud generator
+        function buildDoseCloud(points, offset) {
+            const geom = new THREE.BufferGeometry();
+            const pos = new Float32Array(points.length * 3);
+            const intensities = new Float32Array(points.length);
+
+            points.forEach((p, i) => {
+                pos[i * 3] = p[0] - offset.x;
+                pos[i * 3 + 1] = p[1] - offset.y;
+                pos[i * 3 + 2] = p[2] - offset.z;
+                // Normalize dose mapping (up to 60Gy)
+                intensities[i] = Math.min(1.0, p[3] / 60.0);
+            });
+
+            geom.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+            geom.setAttribute('intensity', new THREE.BufferAttribute(intensities, 1));
+
+            // Custom glowing particle shader
+            const mat = new THREE.ShaderMaterial({
+                uniforms: {
+                    baseColor: { value: new THREE.Color(0x00f0ff) },
+                    hotspotColor: { value: new THREE.Color(0xff0055) },
+                    size: { value: 3.5 }
+                },
+                vertexShader: `
+                    uniform float size;
+                    attribute float intensity;
+                    varying float vIntensity;
+                    void main() {
+                        vIntensity = intensity;
+                        vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
+                        gl_PointSize = size * (120.0 / -mvPosition.z) * (0.4 + intensity * 0.8);
+                        gl_Position = projectionMatrix * mvPosition;
+                    }
+                `,
+                fragmentShader: `
+                    uniform vec3 baseColor;
+                    uniform vec3 hotspotColor;
+                    varying float vIntensity;
+                    void main() {
+                        float r = 0.5 - length(gl_PointCoord - vec2(0.5));
+                        if (r < 0.0) discard;
+                        vec3 finalColor = mix(baseColor, hotspotColor, vIntensity);
+                        float glow = smoothstep(0.0, 0.5, r);
+                        gl_FragColor = vec4(finalColor, glow * (0.2 + vIntensity * 0.8));
+                    }
+                `,
+                transparent: true,
+                depthWrite: false,
+                blending: THREE.AdditiveBlending
+            });
+
+            const cloud = new THREE.Points(geom, mat);
+            cloud.visible = false;
+            scene.add(cloud);
+            loadedMeshes['dose'] = cloud;
+            
+            addToggle('dose', { name: "Prescription Dose Grid", color: 0x00f0ff, default: false });
+        }
+
+        // --- INTERACTIVE PANEL LAYER CONTROLS ---
+        function addToggle(id, props) {
+            const container = document.getElementById('layerToggles');
+            const div = document.createElement('div');
+            div.className = "flex items-center justify-between p-2.5 bg-[#070b13] border border-cyan-500/5 hover:border-cyan-500/20 transition-all duration-200 relative";
+            
+            // Neon accent strip
+            const hexColor = props.color.toString(16).padStart(6, '0');
+            div.style.borderLeft = `3px solid #${hexColor}`;
+            
+            div.innerHTML = `
+                <div class="flex items-center space-x-3 pl-1">
+                    <span class="text-xs uppercase font-bold text-gray-200 tracking-wider">${props.name}</span>
+                </div>
+                <div class="cyber-toggle ${props.default ? 'active' : ''}" onclick="toggleLayer('${id}', this)"></div>
+            `;
+            container.appendChild(div);
+        }
+
+        function toggleLayer(id, el) {
+            el.classList.toggle('active');
+            if (loadedMeshes[id]) {
+                loadedMeshes[id].visible = el.classList.contains('active');
+            }
+        }
+
+        function onResize() {
+            const container = document.getElementById('canvas3d');
+            camera.aspect = container.clientWidth / container.clientHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(container.clientWidth, container.clientHeight);
+        }
+
+        // Primary animation loop
+        function animate() {
+            requestAnimationFrame(animate);
+            controls.update();
+
+            // Gentle slow visual rotation of holographic targets if no active controls drag
+            if (!controls.state === -1 && loadedMeshes["01_t1c.obj"]) {
+                const delta = Date.now() * 0.0001;
+                Object.values(loadedMeshes).forEach(m => {
+                    if (m.isGroup || m.isPoints) {
+                        m.rotation.y = Math.sin(delta * 0.5) * 0.05;
+                    }
+                });
+            }
+
+            renderer.render(scene, camera);
+        }
+
+        window.onload = init3D;
+    </script>
+</body>
+</html>
